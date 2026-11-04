@@ -1,13 +1,18 @@
 // The rules of a battle, with no drawing: the page (battle.js) and the bot (tools/sim.js) both play through this.
-import { GENERALS, ENEMIES, SKILLS, FORMATIONS, TERRAIN, BEATS, ITEMS, CE_BASE, CE_PER_LEVEL, EXP_BASE, FALLEN_TROOPS } from './data.js';
+import { GENERALS, ENEMIES, SKILLS, FORMATIONS, TERRAIN, BEATS, ITEMS, UPGRADES, CE_BASE, CE_PER_LEVEL, EXP_BASE, FALLEN_TROOPS } from './data.js';
+
+const bonus = (up, stat) => Object.entries(UPGRADES).reduce((v, [id, u]) => v + (up[id] && u.stat === stat ? u.amount : 0), 0);
+export const skillsOf = (m) => { const g = GENERALS[m.id]; return [...g.skills, ...Object.entries(g.learn || {}).filter(([, lv]) => m.lv >= lv).map(([s]) => s)]; };
+export const nameOf = (m, party) => (m.id === 'zhuwen' && party.renamed ? '朱全忠' : GENERALS[m.id].name);
+export const lookOf = (id, party) => (id === 'zhuwen' && !party.renamed ? 'zhuwen_y' : id);
 
 export function statsOf(m, party) {
   const g = GENERALS[m.id], l = m.lv - 1, up = party.upgrades || {};
   return {
     max: g.troops + g.g.troops * l,
-    war: g.war + g.g.war * l + (up.spear ? 6 : 0),
+    war: g.war + g.g.war * l + bonus(up, 'war'),
     int: g.int + g.g.int * l,
-    lead: g.lead + g.g.lead * l + (up.armor ? 8 : 0),
+    lead: g.lead + g.g.lead * l + bonus(up, 'lead'),
     spd: g.spd + g.g.spd * l,
   };
 }
@@ -19,12 +24,12 @@ export function newMember(id, lv = 1) { const m = { id, lv, exp: 0, troops: 0 };
 export function createBattle(party, foeIds, terrain, opts = {}) {
   const allies = party.members.map((m, i) => {
     const g = GENERALS[m.id], s = statsOf(m, party);
-    return { key: 'a' + i, id: m.id, name: g.name, type: g.type, side: 'ally', troops: m.troops, ...s, skills: g.skills, member: m, atkUp: 0, atkTurns: 0, defend: false, stun: 0 };
+    return { key: 'a' + i, id: m.id, name: nameOf(m, party), type: g.type, side: 'ally', team: 'red', sprite: lookOf(m.id, party), leader: i === 0, troops: m.troops, ...s, skills: skillsOf(m), member: m, atkUp: 0, atkTurns: 0, defend: false, stun: 0 };
   });
   const foes = foeIds.map((id, i) => {
     const e = ENEMIES[id];
     return { key: 'f' + i, id, name: e.name, type: e.type, side: 'foe', troops: e.troops, max: e.troops, war: e.war, int: e.int, lead: e.lead, spd: e.spd, skills: e.skills || [],
-      general: !!e.general, persuade: !!e.persuade, face: e.face, exp: e.exp, gold: e.gold, atkUp: 0, atkTurns: 0, defend: false, stun: 0, pleaded: 0 };
+      general: !!e.general, persuade: !!e.persuade, flee: e.flee || 0, face: e.face, team: e.team || 'blue', sprite: e.sprite || null, exp: e.exp, gold: e.gold, atkUp: 0, atkTurns: 0, defend: false, stun: 0, pleaded: 0 };
   });
   return { party, allies, foes, terrain, ce: party.ce, ceMax: ceMax(party), formation: party.formation, turn: 0, over: null, opts };
 }
@@ -72,17 +77,18 @@ export function autoCommand(st, u, rng) {
   }
   const can = (s) => u.skills.includes(s) && st.ce >= SKILLS[s].cost;
   const plead = foes.find((f) => persuadable(st, f));
-  if (plead && u.id === 'sunce') return { unit: u, kind: 'persuade', target: plead };
+  if (plead && u.leader) return { unit: u, kind: 'persuade', target: plead };
   const hurt = [...friends].sort((a, b) => a.troops / a.max - b.troops / b.max)[0];
   if (can('regroup') && hurt.troops / hurt.max < 0.5) return { unit: u, kind: 'skill', skill: 'regroup', target: hurt };
   const T = TERRAIN[st.terrain];
   const strongest = [...foes].sort((a, b) => b.troops - a.troops)[0];
-  if (u.id === 'zhouyu' && foes.length >= 2) {
+  if (u.skills.includes('fire') && foes.length >= 2) {
     const el = T.water > T.fire ? 'water' : 'fire';
     if (can(el)) return { unit: u, kind: 'skill', skill: el };
   }
   if (can('rally') && strongest.general && st.turn === 1) return { unit: u, kind: 'skill', skill: 'rally' };
   if (can('volley') && foes.length >= 2) return { unit: u, kind: 'skill', skill: 'volley' };
+  if (can('raid') && foes.length >= 2) return { unit: u, kind: 'skill', skill: 'raid' };
   if (can('charge') && strongest.troops > 300) return { unit: u, kind: 'skill', skill: 'charge', target: strongest };
   if (can('lastStand') && u.troops / u.max < 0.5) return { unit: u, kind: 'skill', skill: 'lastStand', target: strongest };
   const pick = foes.find((f) => BEATS[u.type] === f.type) || weakest;
@@ -155,6 +161,9 @@ export function resolveTurn(st, cmds, rng = Math.random) {
       events.push({ t: 'persuade', a: u.key, d: d.key, ok });
       if (ok) { st.over = 'persuaded'; break; }
     }
+    // a warlord who has seen enough gets out; the fight is won but he lives
+    const runner = st.foes.find((f) => f.flee && f.troops > 0 && f.troops / f.max <= f.flee);
+    if (runner) { st.over = 'fled'; events.push({ t: 'flee', a: runner.key }); break; }
     if (!alive(st.foes).length) st.over = 'win';
     else if (!alive(st.allies).length) st.over = 'lose';
   }
@@ -163,11 +172,12 @@ export function resolveTurn(st, cmds, rng = Math.random) {
 }
 
 // after a battle: troops go back on the members; a win pays out and may level people up
+export const isWin = (o) => o === 'win' || o === 'persuaded' || o === 'fled';
 export function finishBattle(st) {
   const p = st.party;
   p.ce = st.ce;
   const res = { exp: 0, gold: 0, ups: [] };
-  const won = st.over === 'win' || st.over === 'persuaded';
+  const won = isWin(st.over);
   for (const a of st.allies) a.member.troops = a.troops;
   if (!won) return res;
   for (const f of st.foes) { res.exp += f.exp; res.gold += f.gold; }
@@ -183,6 +193,8 @@ export function finishBattle(st) {
       if (!res.ups.includes(m.id)) res.ups.push(m.id);
     }
   }
+  // those waiting at the rear keep up, so swapping them in is never a punishment
+  for (const m of p.reserve || []) { m.exp += res.exp; while (m.exp >= needExp(m.lv)) { m.exp -= needExp(m.lv); m.lv++; } m.troops = statsOf(m, p).max; }
   return res;
 }
 

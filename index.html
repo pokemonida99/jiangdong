@@ -5,31 +5,50 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#15110d">
-<title>江東烽火</title>
-<link rel="stylesheet" href="css/style.css?v=1">
+<meta name="theme-color" content="#000000">
+<title>奪唐：朱全忠傳</title>
+<meta name="description" content="唐末 8-bit RPG：朱溫從碭山窮小子、黃巢部將，到賜名全忠，一路走向奪唐。">
+<link rel="stylesheet" href="css/style.css?v=2">
 </head>
 <body>
 <div id="stage">
   <canvas id="view"></canvas>
-  <div id="hud" hidden>
-    <div id="goal"></div>
-    <button id="menuBtn" class="plaque small">軍務</button>
+  <div id="bottom">
+    <div id="pad" hidden>
+      <div id="goal"></div>
+      <div id="padMain">
+        <div id="dpad">
+          <div class="hub"></div>
+          <button class="u" data-key="ArrowUp" aria-label="上"></button>
+          <button class="d" data-key="ArrowDown" aria-label="下"></button>
+          <button class="l" data-key="ArrowLeft" aria-label="左"></button>
+          <button class="r" data-key="ArrowRight" aria-label="右"></button>
+        </div>
+        <div id="keys">
+          <button id="btnB" class="round b">B<small>軍務</small></button>
+          <button id="btnA" class="round">A<small>調查</small></button>
+          <button id="btnMap" class="mini">地圖</button>
+          <button id="btnCh" class="mini">章節</button>
+        </div>
+      </div>
+    </div>
   </div>
+  <div id="placeTag" hidden></div>
   <div id="battleUi" hidden></div>
   <div id="dialog" hidden>
     <img id="face" alt="" draggable="false">
     <div id="who"></div>
     <div id="line"></div>
-    <div id="more">▼</div>
+    <div id="more"></div>
   </div>
   <div id="choices" hidden></div>
   <div id="menu" hidden></div>
   <div id="toast" hidden></div>
+  <div id="card" hidden></div>
   <div id="title" hidden></div>
   <div id="fade" hidden></div>
-  <div id="boot"><div class="bootMsg">整軍中…</div><button id="bootGo" class="plaque" hidden>點一下開始</button></div>
+  <div id="boot"><div class="bootMsg">整軍中…</div><button id="bootGo" class="plaque red" hidden>點一下開始</button></div>
 </div>
-<script type="module" src="js/main.js?v=1"></script>
+<script type="module" src="js/main.js?v=2"></script>
 </body>
 </html>

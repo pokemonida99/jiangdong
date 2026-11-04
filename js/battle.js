@@ -1,12 +1,12 @@
 // A battle on screen: the troops, the command panel, and the animation of what battle_core decided.
-import { img, drawActor, drawTroop } from './art.js';
+import { img, drawActor, drawTroop, faceSrc, skyOf, pixelText } from './art.js';
 import { GENERALS, SKILLS, ITEMS, FORMATIONS, TERRAIN, TYPE_NAME, BEATS, DUEL } from './data.js';
-import { createBattle, resolveTurn, finishBattle, alive, autoCommand, persuadable, persuadeChance } from './battle_core.js';
+import { createBattle, resolveTurn, finishBattle, alive, autoCommand, persuadable, persuadeChance, isWin } from './battle_core.js';
 import { el, button, onTap, wait, say } from './ui.js';
 import { se, play } from './audio.js';
 const view = () => el('view');
 
-const TROOPS_SHOWN = 6;
+const TROOPS_SHOWN = 5;
 export class BattleScene {
   constructor(G) { this.G = G; this.anims = []; this.parts = []; this.pops = []; this.dead = []; this.t = 0; this.units = []; this.speed = 1; this.bfH = 200; this.shake = 0; this.flash = 0; }
   animate(ms, fn) { return new Promise((res) => { this.anims.push({ t: 0, ms, fn, res }); }); }
@@ -55,34 +55,26 @@ export class BattleScene {
     this.tagW = W; this.tagBf = this.bfH; this.tagDirty = false;
   }
   draw(c, W, H) {
-    const bfH = this.bfH = Math.floor(H * 0.53);
+    const bfH = this.bfH = H;
     this.layout(W);
     if (this.tagW !== W || this.tagBf !== bfH || this.tagDirty) this.renderTags(W);
-    c.fillStyle = '#15110d'; c.fillRect(0, 0, W, H);
-    const bg = img[TERRAIN[this.st.terrain].bg];
+    const bgName = TERRAIN[this.st.terrain].bg, bg = img[bgName];
     const sx = this.shake > 0 ? Math.round(Math.sin(this.t / 22) * 2) : 0;
-    if (bg) { const k = Math.max(W / bg.width, bfH / bg.height), w = bg.width * k, h = bg.height * k; c.drawImage(bg, (W - w) / 2 + sx, bfH - h, w, h); }
+    // one picture pixel to one game pixel, always; a taller screen just gets more sky
+    c.fillStyle = bg ? skyOf(bgName) : '#000000'; c.fillRect(0, 0, W, H);
+    if (bg) c.drawImage(bg, Math.round((W - bg.width) / 2) + sx, bfH - bg.height);
     const list = [...this.st.foes, ...this.st.allies].map((u) => ({ u, p: this.pos[u.key] })).sort((a, b) => a.p.y - b.p.y);
     for (const d of this.dead) {
       c.save(); c.globalAlpha = Math.min(1, d.life / 200); c.translate(d.x + sx, d.y); c.rotate(d.dir * Math.PI / 2);
-      drawTroop(c, d.side, d.type, 0, 0, 8, d.dir < 0 ? false : true); c.restore();
+      drawTroop(c, d.team, d.type, 0, 0, 8, d.dir < 0 ? false : true); c.restore();
     }
     for (const { u, p } of list) this.drawUnit(c, u, p, sx);
     for (const pt of this.parts) { c.fillStyle = pt.c; c.fillRect(Math.round(pt.x) + sx, Math.round(pt.y), pt.s, pt.s); }
-    c.font = '11px Cubic11, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
-    for (const pt of this.pops) this.label(c, pt.text, pt.x + sx, pt.y, pt.c);
-    if (this.flash > 0) { c.fillStyle = `rgba(232,220,192,${Math.min(0.55, this.flash / 240)})`; c.fillRect(0, 0, W, bfH); }
+    for (const pt of this.pops) pixelText(c, pt.text, pt.x + sx, pt.y, pt.c);
+    if (this.flash > 0 && Math.floor(this.t / 40) % 2) { c.fillStyle = '#fcfcfc'; c.fillRect(0, 0, W, bfH); }
     // terrain and formation in the corner, out of the way of the troops
-    c.textAlign = 'left';
     const T = TERRAIN[this.st.terrain], tag = `${T.name}・${FORMATIONS[this.st.formation].name}陣`;
-    const tw = c.measureText(tag).width;
-    c.fillStyle = '#15110d'; c.fillRect(0, 2, tw + 8, 14); c.fillStyle = '#b5301f'; c.fillRect(0, 2, 2, 14);
-    c.fillStyle = '#e8dcc0'; c.fillText(tag, 4, 13);
-  }
-  label(c, t, x, y, col = '#e8dcc0') {
-    c.fillStyle = '#15110d';
-    for (const [a, b] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) c.fillText(t, x + a, y + b);
-    c.fillStyle = col; c.fillText(t, x, y);
+    pixelText(c, tag, 3, 14, '#fcfcfc', 'left');
   }
   drawUnit(c, u, p, sx) {
     if (u.troops <= 0 && !this.pending?.has(u.key)) { this.fallenLabel(c, u, p, sx); return; }
@@ -94,25 +86,23 @@ export class BattleScene {
       for (let i = TROOPS_SHOWN - 1; i >= 0; i--) {
         if (i >= n) continue;
         const s = this.slot(u, i);
-        drawTroop(c, u.side, u.type, p.ox ? 1 : 0, x + s.x, y + s.y + (i % 2 === step ? 0 : -1), u.side === 'ally');
+        drawTroop(c, u.team, u.type, p.ox ? 1 : 0, x + s.x, y + s.y + (i % 2 === step ? 0 : -1), u.side === 'ally');
       }
-      if (u.side === 'ally' || u.general) drawActor(c, u.side === 'ally' ? u.id : u.id === 'taishici' ? 'taishici' : 'zhangying', face, p.ox ? 1 : 0, x, y + 2);
-      else drawTroop(c, u.side, u.type, p.ox ? 1 : 0, x, y + 2, false);
+      if (u.sprite) drawActor(c, u.sprite, face, p.ox ? 1 : 0, x, y + 2);
+      else drawTroop(c, u.team, u.type, p.ox ? 1 : 0, x, y + 2, false);
     }
     // name and troops, under the feet
-    c.font = '11px Cubic11, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
     const active = this.activeKey === u.key, target = this.targetKeys?.includes(u.key);
-    if (active && Math.floor(this.t / 300) % 2) { c.fillStyle = '#d9a441'; c.fillRect(x - 3, y - 41, 7, 2); c.fillRect(x - 2, y - 39, 5, 2); c.fillRect(x - 1, y - 37, 3, 2); }
-    if (target) { c.strokeStyle = Math.floor(this.t / 200) % 2 ? '#d9a441' : '#e8dcc0'; c.strokeRect(Math.round(x - 26) + 0.5, Math.round(y - 30) + 0.5, 52, 42); }
+    if (active && Math.floor(this.t / 300) % 2) { c.fillStyle = '#f8b800'; c.fillRect(x - 3, y - 41, 7, 2); c.fillRect(x - 2, y - 39, 5, 2); c.fillRect(x - 1, y - 37, 3, 2); }
+    if (target) { c.strokeStyle = Math.floor(this.t / 200) % 2 ? '#f8b800' : '#fcfcfc'; c.strokeRect(Math.round(x - 26) + 0.5, Math.round(y - 30) + 0.5, 52, 42); }
     const bw = 40, bx = Math.round(p.x - bw / 2), by = Math.round(p.y + 7);
-    c.fillStyle = '#15110d'; c.fillRect(bx - 1, by - 1, bw + 2, 5);
-    c.fillStyle = u.side === 'ally' ? '#b5301f' : '#5d7396'; c.fillRect(bx, by, Math.ceil(bw * Math.max(0, u.troops) / u.max), 3);
+    c.fillStyle = '#000000'; c.fillRect(bx - 1, by - 1, bw + 2, 5);
+    c.fillStyle = u.side === 'ally' ? '#58d854' : '#f83800'; c.fillRect(bx, by, Math.ceil(bw * Math.max(0, u.troops) / u.max), 3);
   }
   fallenLabel(c, u, p, sx) {
-    c.font = '11px Cubic11, sans-serif'; c.textAlign = 'center';
-    this.label(c, '潰', p.x + sx, p.y, '#cdbd98');
+    pixelText(c, '潰', p.x + sx, p.y, '#bcbcbc');
   }
-  popup(key, text, col) { const p = this.pos[key]; this.pops.push({ x: p.x, y: p.y - 24, text, c: col || '#e8dcc0', life: 800 }); }
+  popup(key, text, col) { const p = this.pos[key]; this.pops.push({ x: p.x, y: p.y - 24, text, c: col || '#fcfcfc', life: 800 }); }
   burst(x, y, cols, n = 10, sp = 1.6) {
     for (let i = 0; i < n; i++) this.parts.push({ x, y, vx: (Math.random() - 0.5) * sp * 2, vy: (Math.random() - 0.8) * sp * 2, g: 0.08, life: 300 + Math.random() * 280, c: cols[i % cols.length], s: 1 + (i % 3 === 0 ? 1 : 0) });
   }
@@ -120,11 +110,11 @@ export class BattleScene {
     const u = this.byKey[h.unit], p = this.pos[h.unit];
     const was = this.shown[h.unit], now = h.after <= 0 ? 0 : Math.max(1, Math.ceil(h.after / u.max * TROOPS_SHOWN));
     this.shown[h.unit] = now;
-    for (let i = now; i < was; i++) { const s = this.slot(u, i); this.dead.push({ x: p.x + s.x, y: p.y + s.y, side: u.side, type: u.type, dir: u.side === 'ally' ? 1 : -1, life: 700 }); }
+    for (let i = now; i < was; i++) { const s = this.slot(u, i); this.dead.push({ x: p.x + s.x, y: p.y + s.y, team: u.team, type: u.type, dir: u.side === 'ally' ? 1 : -1, life: 700 }); }
     u.hitT = this.t + 280;
     this.shake = 140;
-    this.popup(h.unit, String(h.dmg), u.side === 'ally' ? '#ffb39a' : '#ffe08a');
-    this.burst(p.x, p.y - 12, ['#e8dcc0', '#b5301f', '#15110d'], 8);
+    this.popup(h.unit, String(h.dmg), u.side === 'ally' ? '#f87858' : '#f8d878');
+    this.burst(p.x, p.y - 12, ['#fcfcfc', '#f83800', '#000000'], 8);
     if (h.fell) { se('fall'); this.log(`${u.name}潰散了！`); this.tagDirty = true; }
   }
   log(text) { const l = el('battleUi').querySelector('.blog'); if (l) l.textContent = text; }
@@ -153,20 +143,24 @@ export class BattleScene {
       await this.sleep(200);
     } else if (ev.t === 'defend') {
       this.log(`${a.name} 列陣防守`);
-      this.popup(a.key, '防', '#a9c8bb');
+      this.popup(a.key, '防', '#3cbcfc');
       await this.sleep(320);
     } else if (ev.t === 'item') {
       this.log(`${a.name} 使用${ITEMS[ev.item].name}`);
       se('heal');
-      for (const h of ev.heals) this.popup(h.unit, '+' + h.amount, '#a9d8a0');
-      if (ev.ce) this.popup(a.key, '計+' + ev.ce, '#a9c8bb');
+      for (const h of ev.heals) this.popup(h.unit, '+' + h.amount, '#58d854');
+      if (ev.ce) this.popup(a.key, '計+' + ev.ce, '#3cbcfc');
       for (const h of ev.heals) this.refill(h.unit);
       await this.sleep(420);
     } else if (ev.t === 'persuade') {
       const d = this.byKey[ev.d];
       this.log(`${a.name} 向 ${d.name} 喊話……`);
       await this.sleep(500);
-      if (!ev.ok) { this.popup(ev.d, '不為所動', '#e8dcc0'); this.log(`${d.name} 不為所動。再喊一次，機會會更高。`); await this.sleep(600); }
+      if (!ev.ok) { this.popup(ev.d, '不為所動', '#fcfcfc'); this.log(`${d.name} 不為所動。再喊一次，機會會更高。`); await this.sleep(600); }
+    } else if (ev.t === 'flee') {
+      this.log(`${a.name} 撥馬突圍！`);
+      se('alarm');
+      await this.animate(520, (k) => { pa.ox = -k * 180; });
     } else if (ev.t === 'fizzle') { this.log('計 不足，沒有成功。'); await this.sleep(400); }
     this.activeKey = null;
     this.renderSquad();
@@ -175,27 +169,27 @@ export class BattleScene {
   async skillFx(ev, a, pa, sk) {
     if (ev.ups.length) {
       se('buff');
-      for (const k of ev.ups) { const p = this.pos[k]; this.popup(k, '攻↑', '#ffe08a'); for (let i = 0; i < 10; i++) this.parts.push({ x: p.x - 12 + Math.random() * 24, y: p.y, vx: 0, vy: -0.7 - Math.random(), life: 420, c: '#d9a441', s: 1 }); }
+      for (const k of ev.ups) { const p = this.pos[k]; this.popup(k, '攻↑', '#f8d878'); for (let i = 0; i < 10; i++) this.parts.push({ x: p.x - 12 + Math.random() * 24, y: p.y, vx: 0, vy: -0.7 - Math.random(), life: 420, c: '#f8b800', s: 1 }); }
       await this.sleep(460);
     }
     if (ev.heals.length) {
       se('heal');
-      for (const h of ev.heals) { const p = this.pos[h.unit]; this.refill(h.unit); this.popup(h.unit, '+' + h.amount, '#a9d8a0'); for (let i = 0; i < 12; i++) this.parts.push({ x: p.x - 14 + Math.random() * 28, y: p.y + 4, vx: 0, vy: -0.6 - Math.random(), life: 460, c: i % 2 ? '#a9d8a0' : '#e8dcc0', s: 1 }); }
+      for (const h of ev.heals) { const p = this.pos[h.unit]; this.refill(h.unit); this.popup(h.unit, '+' + h.amount, '#58d854'); for (let i = 0; i < 12; i++) this.parts.push({ x: p.x - 14 + Math.random() * 28, y: p.y + 4, vx: 0, vy: -0.6 - Math.random(), life: 460, c: i % 2 ? '#58d854' : '#fcfcfc', s: 1 }); }
       await this.sleep(460);
     }
     if (ev.hits.length) {
       if (sk.el === 'fire') {
         se('fire');
-        for (const h of ev.hits) { const p = this.pos[h.unit]; for (let i = 0; i < 26; i++) this.parts.push({ x: p.x - 22 + Math.random() * 44, y: p.y + 8 - Math.random() * 6, vx: (Math.random() - 0.5) * 0.4, vy: -0.8 - Math.random() * 1.4, life: 300 + Math.random() * 420, c: ['#b5301f', '#d9a441', '#ffe08a'][i % 3], s: 1 + (i % 4 === 0 ? 1 : 0) }); }
+        for (const h of ev.hits) { const p = this.pos[h.unit]; for (let i = 0; i < 26; i++) this.parts.push({ x: p.x - 22 + Math.random() * 44, y: p.y + 8 - Math.random() * 6, vx: (Math.random() - 0.5) * 0.4, vy: -0.8 - Math.random() * 1.4, life: 300 + Math.random() * 420, c: ['#f83800', '#f8b800', '#fcfcfc'][i % 3], s: 1 + (i % 4 === 0 ? 1 : 0) }); }
         await this.sleep(420);
       } else if (sk.el === 'water') {
         se('water');
         const left = Math.min(...ev.hits.map((h) => this.pos[h.unit].x)) - 40;
-        for (let i = 0; i < 60; i++) { const h = ev.hits[i % ev.hits.length], p = this.pos[h.unit]; this.parts.push({ x: left - 40 - Math.random() * 30, y: p.y - 12 + Math.random() * 22, vx: 3 + Math.random() * 1.5, vy: 0, life: 420 + Math.random() * 120, c: ['#3d4f70', '#8fa3b5', '#e8dcc0'][i % 3], s: 2 }); }
+        for (let i = 0; i < 60; i++) { const h = ev.hits[i % ev.hits.length], p = this.pos[h.unit]; this.parts.push({ x: left - 40 - Math.random() * 30, y: p.y - 12 + Math.random() * 22, vx: 3 + Math.random() * 1.5, vy: 0, life: 420 + Math.random() * 120, c: ['#0058f8', '#3cbcfc', '#fcfcfc'][i % 3], s: 2 }); }
         await this.sleep(460);
       } else if (ev.skill === 'volley') {
         se('arrow');
-        for (const h of ev.hits) { const p = this.pos[h.unit]; for (let i = 0; i < 12; i++) { const fx = pa.x, fy = pa.y - 16, tx = p.x - 18 + Math.random() * 36, ty = p.y - 4 + Math.random() * 14, life = 300; this.parts.push({ x: fx, y: fy, vx: (tx - fx) / life * 16, vy: (ty - fy) / life * 16, life, c: '#15110d', s: 1 }); } }
+        for (const h of ev.hits) { const p = this.pos[h.unit]; for (let i = 0; i < 12; i++) { const fx = pa.x, fy = pa.y - 16, tx = p.x - 18 + Math.random() * 36, ty = p.y - 4 + Math.random() * 14, life = 300; this.parts.push({ x: fx, y: fy, vx: (tx - fx) / life * 16, vy: (ty - fy) / life * 16, life, c: '#fcfcfc', s: 1 }); } }
         await this.sleep(300);
       } else {
         const d = this.pos[ev.hits[0].unit];
@@ -239,7 +233,7 @@ export class BattleScene {
     c.innerHTML = '';
     if (head) {
       const h = document.createElement('div'); h.className = 'bhead';
-      h.innerHTML = (head.face ? `<img src="assets/${head.face}.png?v=1" draggable="false" alt="">` : '') + `<div class="tx">${head.html}</div>`;
+      h.innerHTML = (head.face ? `<img src="${faceSrc(head.face)}" draggable="false" alt="">` : '') + `<div class="tx">${head.html}</div>`;
       c.appendChild(h);
     }
     const g = document.createElement('div'); g.className = 'bgrid' + (opts.two ? ' two' : '');
@@ -251,10 +245,10 @@ export class BattleScene {
   // resolves with a command, or 'auto' / 'back'
   chooseFor(u, canBack) {
     return new Promise((res) => {
-      const st = this.st, g = GENERALS[u.id];
+      const st = this.st;
       const main = () => {
         this.targetKeys = null;
-        const head = { face: u.id, html: `<b>${u.name}</b>　${TYPE_NAME[u.type]}兵・剋${TYPE_NAME[BEATS[u.type]]}<br>兵力 ${u.troops} / ${u.max}` };
+        const head = { face: u.sprite, html: `<b>${u.name}</b>　${TYPE_NAME[u.type]}兵・剋${TYPE_NAME[BEATS[u.type]]}<br>兵力 ${u.troops} / ${u.max}` };
         const bs = [
           button('攻擊', 'red', () => pickFoe((t) => res({ unit: u, kind: 'attack', target: t }))),
           button('計略', 'bronze', skills),
@@ -263,7 +257,7 @@ export class BattleScene {
           button(this.G.s.autoOn ? '自動中' : '全軍自動', '', () => res('auto')),
           canBack ? button('上一位', '', () => res('back')) : button('換陣形', '', forms),
         ];
-        const plead = u.id === 'sunce' && alive(st.foes).find((f) => persuadable(st, f));
+        const plead = u.leader && alive(st.foes).find((f) => persuadable(st, f));
         if (plead) bs.unshift(button('勸降', 'red', () => res({ unit: u, kind: 'persuade', target: plead }), `${Math.round(persuadeChance(st, u, plead) * 100)}%`));
         this.card(head, bs);
       };
@@ -282,7 +276,7 @@ export class BattleScene {
         this.card({ html: '選擇我方一隊' }, [...list.map((f) => button(f.name, '', () => { this.pickUnit = null; this.targetKeys = null; done(f); }, `${f.troops} / ${f.max}`)), back()], { two: true });
       };
       const skills = () => {
-        const bs = (g.skills || []).map((id) => {
+        const bs = u.skills.map((id) => {
           const sk = SKILLS[id], ok = st.ce >= sk.cost;
           return button(sk.name, ok ? 'bronze' : 'dim', ok ? () => {
             if (sk.kind === 'one' || sk.kind === 'self') pickFoe((t) => res({ unit: u, kind: 'skill', skill: id, target: t }));
@@ -372,13 +366,13 @@ export class BattleScene {
 export async function runBattle(G, { foes, terrain, music = 'battle', scripted }) {
   const b = new BattleScene(G);
   G.battle = b; G.scene = 'battle';
-  el('hud').hidden = true;
+  el('pad').hidden = true; el('placeTag').hidden = true;
   const st = createBattle(G.s.party, foes, terrain);
   b.st = st;
   b.byKey = Object.fromEntries([...st.allies, ...st.foes].map((u) => [u.key, u]));
   b.shown = Object.fromEntries([...st.allies, ...st.foes].map((u) => [u.key, b.shownOf(u)]));
   // positions exist from the start: on a throttled tab the first frame can come after the first event
-  b.bfH = Math.floor(view().height * 0.53);
+  b.bfH = view().height;
   b.layout(view().width);
   G.s.autoOn = false;
   play(music);
@@ -389,23 +383,24 @@ export async function runBattle(G, { foes, terrain, music = 'battle', scripted }
   if (scripted) await scripted(b);
   await b.run();
   const res = finishBattle(st);
-  const won = st.over === 'win' || st.over === 'persuaded';
+  const won = isWin(st.over);
   if (won) {
     se('win');
-    let html = st.over === 'persuaded' ? '勸降成功！' : '勝利！';
+    let html = st.over === 'persuaded' ? '勸降成功！' : st.over === 'fled' ? '敵將突圍而去！' : '勝利！';
     html += `<br>經驗 +${res.exp}　錢 +${res.gold}`;
-    if (res.ups.length) { html += '<br>' + res.ups.map((id) => GENERALS[id].name).join('、') + ' 升級了！兵力上限提高。'; setTimeout(() => se('level'), 500); }
+    if (res.ups.length) { html += '<br>' + res.ups.map((id) => (id === 'zhuwen' && G.s.party.renamed ? '朱全忠' : GENERALS[id].name)).join('、') + ' 升級了！兵力上限提高。'; setTimeout(() => se('level'), 500); }
     b.logCard(html);
     await tapToGo(b);
   } else {
     se('lose');
-    b.logCard('全軍潰散……退回最後的營地重整，經驗和錢都保留。');
+    b.logCard('全軍潰散……退回最後的烽火台重整，經驗和錢都保留。');
     await tapToGo(b);
   }
   el('battleUi').hidden = true;
   el('stage').querySelector('.tags')?.remove();
   G.scene = 'field'; G.battle = null;
-  el('hud').hidden = false;
+  el('pad').hidden = false;
+  G.renderHud();
   return st.over;
 }
 function tapToGo(b) {
@@ -416,9 +411,9 @@ function tapToGo(b) {
 }
 
 // 單挑: guess the other side's move. 猛攻 beats 虛招 beats 格擋 beats 猛攻.
-const MOVES = { strike: { name: '猛攻', beats: 'feint', tell: '太史慈壓低身子，雙臂蓄滿了力。' }, guard: { name: '格擋', beats: 'strike', tell: '太史慈收回手戟，兩腳踩穩。' }, feint: { name: '虛招', beats: 'guard', tell: '太史慈腳步飄忽，眼神一直游移。' } };
+const MOVES = { strike: { name: '猛攻', beats: 'feint', tell: '壓低身子，雙臂蓄滿了力。' }, guard: { name: '格擋', beats: 'strike', tell: '收回兵器，兩腳踩穩。' }, feint: { name: '虛招', beats: 'guard', tell: '腳步飄忽，眼神一直游移。' } };
 export class DuelScene {
-  constructor(G) { this.G = G; this.t = 0; this.a = { ox: 0 }; this.b = { ox: 0 }; this.anims = []; this.parts = []; this.flash = 0; this.pops = []; }
+  constructor(G, opts) { this.G = G; this.opts = opts; this.t = 0; this.a = { ox: 0 }; this.b = { ox: 0 }; this.anims = []; this.parts = []; this.flash = 0; this.pops = []; }
   animate(ms, fn) { return new Promise((res) => { this.anims.push({ t: 0, ms, fn, res }); }); }
   update(dt) {
     this.t += dt;
@@ -430,25 +425,24 @@ export class DuelScene {
     if (this.flash > 0) this.flash -= dt;
   }
   draw(c, W, H) {
-    const bfH = Math.floor(H * 0.53);
-    this.W = W; this.bfH = bfH;
-    c.fillStyle = '#15110d'; c.fillRect(0, 0, W, H);
-    const bg = img.bg_forest;
-    if (bg) { const k = Math.max(W / bg.width, bfH / bg.height), w = bg.width * k, h = bg.height * k; c.drawImage(bg, (W - w) / 2, bfH - h, w, h); }
-    const y = bfH * 0.92;
-    drawActor(c, 'taishici', 'right', this.b.ox ? 1 : 0, W * 0.28 + this.b.ox, y, 2);
-    drawActor(c, 'sunce', 'left', this.a.ox ? 1 : 0, W * 0.72 + this.a.ox, y, 2);
+    this.W = W; this.bfH = H;
+    const bgName = this.opts.bg || 'bg2_forest', bg = img[bgName];
+    c.fillStyle = bg ? skyOf(bgName) : '#000000'; c.fillRect(0, 0, W, H);
+    if (bg) c.drawImage(bg, Math.round((W - bg.width) / 2), H - bg.height);
+    const y = H * 0.92;
+    drawActor(c, this.opts.foeSprite, 'right', this.b.ox ? 1 : 0, W * 0.28 + this.b.ox, y, 2);
+    drawActor(c, this.opts.mySprite, 'left', this.a.ox ? 1 : 0, W * 0.72 + this.a.ox, y, 2);
     for (const p of this.parts) { c.fillStyle = p.c; c.fillRect(Math.round(p.x), Math.round(p.y), p.s, p.s); }
-    c.font = '11px Cubic11, sans-serif'; c.textAlign = 'center';
-    for (const p of this.pops) { c.fillStyle = '#15110d'; c.fillText(p.text, p.x + 1, p.y + 1); c.fillStyle = p.c; c.fillText(p.text, p.x, p.y); }
-    if (this.flash > 0) { c.fillStyle = `rgba(232,220,192,${Math.min(0.7, this.flash / 200)})`; c.fillRect(0, 0, W, bfH); }
+    for (const p of this.pops) pixelText(c, p.text, p.x, p.y, p.c);
+    if (this.flash > 0 && Math.floor(this.t / 40) % 2) { c.fillStyle = '#fcfcfc'; c.fillRect(0, 0, W, H); }
   }
-  clashAt(x, y) { for (let i = 0; i < 18; i++) this.parts.push({ x, y, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.8) * 3, life: 260 + Math.random() * 260, c: ['#e8dcc0', '#d9a441', '#b5301f'][i % 3], s: 1 + (i % 3 === 0 ? 1 : 0) }); }
+  clashAt(x, y) { for (let i = 0; i < 18; i++) this.parts.push({ x, y, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.8) * 3, life: 260 + Math.random() * 260, c: ['#fcfcfc', '#f8b800', '#f83800'][i % 3], s: 1 + (i % 3 === 0 ? 1 : 0) }); }
 }
-export async function runDuel(G) {
-  const d = new DuelScene(G);
+// opts: { foeName, foeSprite, foeFace, myName, mySprite, myFace, bg }
+export async function runDuel(G, opts) {
+  const d = new DuelScene(G, opts);
   G.duel = d; G.scene = 'duel';
-  el('hud').hidden = true;
+  el('pad').hidden = true; el('placeTag').hidden = true;
   play('duel');
   const ui = el('battleUi');
   ui.hidden = false;
@@ -459,8 +453,8 @@ export async function runDuel(G) {
     const his = keys[Math.floor(Math.random() * 3)];
     const tell = Math.random() < DUEL.tellChance ? his : keys[Math.floor(Math.random() * 3)];
     const mine = await new Promise((res) => {
-      ui.innerHTML = `<div class="duelFaces"><div><img src="assets/taishici.png?v=1" alt="" draggable="false"><div>太史慈<div class="pips">${pips(foe)}</div></div></div><div><img src="assets/sunce.png?v=1" alt="" draggable="false"><div>孫策<div class="pips">${pips(me)}</div></div></div></div>
-        <div class="duelTell">第 ${round} 回合：${MOVES[tell].tell}</div><div class="duelHelp">猛攻破虛招　虛招破格擋　格擋破猛攻（對方的動作可能是假的）</div><div class="bgrid"></div>`;
+      ui.innerHTML = `<div class="duelFaces"><div><img src="${faceSrc(opts.foeFace)}" alt="" draggable="false"><div>${opts.foeName}<div class="pips">${pips(foe)}</div></div></div><div><img src="${faceSrc(opts.myFace)}" alt="" draggable="false"><div>${opts.myName}<div class="pips">${pips(me)}</div></div></div></div>
+        <div class="duelTell">第 ${round} 回合：${opts.foeName}${MOVES[tell].tell}</div><div class="duelHelp">猛攻破虛招　虛招破格擋　格擋破猛攻（對方的動作可能是假的）</div><div class="bgrid"></div>`;
       const g = ui.querySelector('.bgrid');
       for (const k of keys) g.appendChild(button(MOVES[k].name, k === 'strike' ? 'red' : k === 'guard' ? '' : 'bronze', () => res(k)));
     });
@@ -470,8 +464,8 @@ export async function runDuel(G) {
     d.clashAt(W / 2, y); d.flash = 150; se('clash');
     let text;
     if (mine === his) text = `兩邊都用了${MOVES[mine].name}，兵刃相撞，誰也沒佔便宜。`;
-    else if (MOVES[mine].beats === his) { foe--; se('hit'); d.pops.push({ x: W * 0.28, y, text: '命中', c: '#ffe08a', life: 700 }); text = `你的${MOVES[mine].name}破了他的${MOVES[his].name}！`; }
-    else { me--; se('hit'); d.pops.push({ x: W * 0.72, y, text: '受創', c: '#ffb39a', life: 700 }); text = `他的${MOVES[his].name}破了你的${MOVES[mine].name}！`; }
+    else if (MOVES[mine].beats === his) { foe--; se('hit'); d.pops.push({ x: W * 0.28, y, text: '命中', c: '#f8d878', life: 700 }); text = `你的${MOVES[mine].name}破了他的${MOVES[his].name}！`; }
+    else { me--; se('hit'); d.pops.push({ x: W * 0.72, y, text: '受創', c: '#f87858', life: 700 }); text = `他的${MOVES[his].name}破了你的${MOVES[mine].name}！`; }
     ui.querySelector('.duelTell').textContent = text;
     await d.animate(200, (k) => { d.a.ox = -W * 0.2 * (1 - k); d.b.ox = W * 0.2 * (1 - k); });
     d.a.ox = d.b.ox = 0;
@@ -479,5 +473,5 @@ export async function runDuel(G) {
   }
   const won = me >= foe;
   ui.hidden = true;
-  return { won, me, foe, close() { G.scene = 'field'; G.duel = null; el('hud').hidden = false; } };
+  return { won, me, foe, close() { G.scene = 'field'; G.duel = null; el('pad').hidden = false; G.renderHud(); } };
 }

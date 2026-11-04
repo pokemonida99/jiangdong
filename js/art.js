@@ -1,8 +1,12 @@
-// Pictures: GPT art from assets/ (made by tools/import_art.py) and the map tiles drawn here.
-const FILES = ['sunce', 'zhouyu', 'chengpu', 'huanggai', 'taishici', 'zhangying', 'liuyao', 'soldier', 'bg_plain', 'bg_forest', 'bg_ford', 'bg_gate', 'title', 'logo',
-  'w_sunce', 'w_zhouyu', 'w_chengpu', 'w_huanggai', 'w_taishici', 'w_zhangying', 'w_soldier', 'troops_red', 'troops_blue'];
+// Pictures: GPT art from assets/ (made by tools/import_art.py) and the 8-bit tiles drawn here from the console's colours.
+import { NES as N } from './palette.js';
+export const FACE_IDS = ['zhuwen_y', 'zhuwen', 'zhanghui', 'likeyong', 'zhucun', 'wangshi', 'liuchong', 'liumu', 'huangchao', 'mengkai', 'yanshi', 'xietong', 'pangshigu', 'zhuzhen', 'gecongzhou', 'jingxiang', 'wangchongrong', 'yangyanhong', 'shangrang', 'liyao', 'mishen', 'envoy', 'peasant', 'soldier_b', 'soldier_r', 'soldier_t', 'bandit'];
+const WALKERS = ['zhuwen_y', 'zhuwen', 'zhanghui', 'likeyong', 'zhucun', 'wangshi', 'liuchong', 'liumu', 'huangchao', 'mengkai', 'yanshi', 'xietong', 'pangshigu', 'zhuzhen', 'gecongzhou', 'jingxiang', 'wangchongrong', 'yangyanhong', 'shangrang', 'envoy', 'peasant', 'soldier_b', 'soldier_r', 'soldier_t', 'bandit'];
+const FILES = ['title2', 'logo2', 'bg2_plain', 'bg2_forest', 'bg2_ford', 'bg2_gate', 'bg2_hall', 'bg2_night', 'bg2_pass', 'bg2_south', 'troops_red', 'troops_yellow', 'troops_blue', 'troops_black', ...WALKERS.map((k) => 'w_' + k)];
+export const ART_V = 2;
 export const img = {};
 export const TS = 16;
+export const faceSrc = (id) => `assets/${id}.png?v=${ART_V}`;
 
 export async function loadArt(onProgress) {
   let n = 0;
@@ -10,67 +14,225 @@ export async function loadArt(onProgress) {
     const im = new Image();
     im.onload = () => { img[f] = im; onProgress && onProgress(++n / FILES.length); res(); };
     im.onerror = () => { onProgress && onProgress(++n / FILES.length); res(); };
-    im.src = `assets/${f}.png?v=1`;
+    im.src = `assets/${f}.png?v=${ART_V}`;
   })));
-  makePaper();
   makeTiles();
 }
 
-// a repeating grain for the panels, instead of a gradient
-function makePaper() {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const x = c.getContext('2d');
-  let seed = 7;
-  const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  for (let i = 0; i < 220; i++) { x.fillStyle = r() < 0.5 ? 'rgba(60,40,20,.09)' : 'rgba(255,250,230,.14)'; x.fillRect(Math.floor(r() * 64), Math.floor(r() * 64), 1 + Math.floor(r() * 3), 1); }
-  document.documentElement.style.setProperty('--paper', `url(${c.toDataURL()})`);
-}
-
-const P = { ink: '#15110d', grass: '#8b9458', grass2: '#7a8449', grass3: '#a0a766', sand: '#dcc08f', sand2: '#c7a874', road: '#c9a979', road2: '#b39163', water: '#2d3a55', water2: '#3d4f70', foam: '#8fa3b5',
-  tree: '#2e4a38', tree2: '#3f6b5e', trunk: '#5a3a24', red: '#b5301f', red2: '#7c1f14', silk: '#e8dcc0', silk2: '#cdbd98', stone: '#77806a', stone2: '#5c6452', wood: '#8a6236', wood2: '#5e4023', forest: '#566b44', forest2: '#48593a', gold: '#d9a441' };
 export const tiles = {};
-
 function tile(name, fn, variants = 1) {
   tiles[name] = [];
   for (let v = 0; v < variants; v++) {
     const c = document.createElement('canvas'); c.width = c.height = TS;
     const x = c.getContext('2d');
-    let seed = 97 + v * 131 + name.charCodeAt(0) * 7;
-    const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const px = (col, a, b, w = 1, h = 1) => { x.fillStyle = col; x.fillRect(a, b, w, h); };
-    fn(px, r, v);
+    // art: rows of characters, one per pixel, looked up in the palette; space leaves the pixel alone
+    const art = (pal, rows, ox = 0, oy = 0) => rows.forEach((r, j) => [...r].forEach((ch, i) => { if (ch !== ' ') px(pal[ch], ox + i, oy + j); }));
+    fn(px, art, v);
     tiles[name].push(c);
   }
 }
-const speck = (px, r, col, n) => { for (let i = 0; i < n; i++) px(col, Math.floor(r() * TS), Math.floor(r() * TS)); };
+// a fixed scatter: repeating patterns are what these machines drew, not noise
+const dots = (px, col, list) => { for (const [a, b] of list) px(col, a, b); };
+const SPECK_A = [[2, 3], [9, 1], [13, 6], [5, 9], [11, 12], [1, 13], [7, 14]];
+const SPECK_B = [[4, 1], [12, 3], [7, 6], [2, 8], [14, 10], [9, 11], [4, 14]];
+
+function grassy(px, base, dark, light) {
+  px(base, 0, 0, TS, TS);
+  for (const [a, b] of SPECK_A) { px(dark, a, b); px(dark, a + 1, b); }
+  if (light) dots(px, light, SPECK_B);
+}
+function tree(px, art, base, dark, light) {
+  art({ d: dark, l: light, k: N.black, t: N.brown0 }, [
+    '     kkkkkk     ',
+    '   kkddlldddk   ',
+    '  kddlllldddlk  ',
+    '  kdlllddddlldk ',
+    ' kddllddddlllddk',
+    ' kddddddlllddddk',
+    ' kddlddddldddddk',
+    '  kdddlddddddk  ',
+    '   kkdddddkkk   ',
+    '     kkttkk     ',
+    '      kttk      ',
+    '      kttk      ',
+    '     kkttkk     ',
+  ], 0, 2);
+}
+function peak(px, art, rock, dark, cap) {
+  art({ r: rock, d: dark, c: cap, k: N.black }, [
+    '       kk       ',
+    '      kcck      ',
+    '     kcccrk     ',
+    '     kccrrdk    ',
+    '    krcrrrdk    ',
+    '   krrrrrrddk   ',
+    '   krrdrrrddk   ',
+    '  krrrrdrrrddk  ',
+    '  krrrrrrrdddk  ',
+    ' krrrrrrrrrdddk ',
+    ' krrdrrrrrrrddk ',
+    'krrrrrdrrrrrdddk',
+    'krrrrrrrrrrrrddk',
+    'kkkkkkkkkkkkkkkk',
+  ], 0, 1);
+}
+const waves = (px, base, foam, v) => {
+  px(base, 0, 0, TS, TS);
+  const s = v * 4;
+  for (const [a, b] of [[1, 3], [9, 6], [3, 11], [11, 13]]) { px(foam, (a + s) % 14, b, 3, 1); px(foam, (a + s + 3) % 15, b - 1, 1, 1); }
+};
+const brick = (px, base, dark, light) => {
+  px(base, 0, 0, TS, TS);
+  for (const y of [3, 7, 11, 15]) px(dark, 0, y, TS, 1);
+  for (let row = 0; row < 4; row++) for (let i = row % 2 ? 4 : 0; i < TS; i += 8) { px(dark, i, row * 4, 1, 3); }
+  if (light) for (let row = 0; row < 4; row++) px(light, row % 2 ? 5 : 1, row * 4, 2, 1);
+};
 
 function makeTiles() {
-  const ground = (px, r) => { px(P.grass, 0, 0, TS, TS); speck(px, r, P.grass2, 12); speck(px, r, P.grass3, 5); };
-  tile('.', ground, 4);
-  tile(',', (px, r) => { ground(px, r); for (let i = 0; i < 4; i++) { const a = 2 + Math.floor(r() * 11), b = 3 + Math.floor(r() * 10); px(P.tree2, a, b, 1, 3); px(P.tree2, a + 2, b + 1, 1, 2); } }, 3);
-  tile('R', (px, r) => { px(P.road, 0, 0, TS, TS); speck(px, r, P.road2, 14); speck(px, r, P.silk2, 4); }, 3);
-  tile('S', (px, r) => { px(P.sand, 0, 0, TS, TS); speck(px, r, P.sand2, 14); }, 3);
-  tile('F', (px, r) => { px(P.forest, 0, 0, TS, TS); speck(px, r, P.forest2, 18); speck(px, r, P.grass2, 5); }, 3);
-  // two frames, the map swaps them for the water's movement
-  tile('W', (px, r, v) => { px(P.water, 0, 0, TS, TS); for (let i = 0; i < 5; i++) { const a = (i * 7 + v * 5) % 13, b = (i * 5 + v * 3) % 15; px(P.water2, a, b, 4, 1); } px(P.foam, (3 + v * 6) % 14, (9 + v * 2) % 15, 2, 1); }, 2);
-  const crown = (px, c1, c2) => {
-    px(P.ink, 3, 1, 10, 1); px(P.ink, 1, 2, 2, 1); px(P.ink, 13, 2, 2, 1); px(P.ink, 0, 3, 1, 7); px(P.ink, 15, 3, 1, 7); px(P.ink, 1, 10, 2, 1); px(P.ink, 13, 10, 2, 1); px(P.ink, 3, 11, 10, 1);
-    px(c1, 3, 2, 10, 9); px(c1, 1, 3, 14, 7); px(c2, 3, 3, 5, 2); px(c2, 9, 5, 4, 2); px(c2, 4, 7, 3, 2);
-    px(P.trunk, 7, 12, 2, 3); px(P.ink, 6, 12, 1, 3); px(P.ink, 9, 12, 1, 3); px(P.ink, 6, 15, 4, 1);
+  const G = ['#58d854', '#00a800', '#b8f818'];
+  // ---- the great map
+  tile('.', (px) => grassy(px, G[0], G[1]));
+  tile(',', (px) => grassy(px, N.tan === '#f8b800' ? '#f8d878' : '#f8d878', N.brown2));
+  tile('d', (px) => { grassy(px, '#fce0a8', '#f8b800'); });
+  tile('o', (px) => grassy(px, '#00a800', '#006800', '#58d854'));
+  tile('T', (px, art) => { grassy(px, '#00a800', '#006800'); tree(px, art, 0, '#005800', '#00b800'); });
+  tile('M', (px, art) => { grassy(px, '#f8d878', '#ac7c00'); peak(px, art, '#ac7c00', '#503000', '#f0d0b0'); });
+  tile('H', (px, art) => { px('#bcbcbc', 0, 0, TS, TS); peak(px, art, '#7c7c7c', '#3c3c3c', '#fcfcfc'); });
+  tile('W', (px, a, v) => waves(px, '#0058f8', '#3cbcfc', v), 2);
+  tile('r', (px, a, v) => waves(px, '#0078f8', '#a4e4fc', v), 2);
+  tile('R', (px) => { px('#f0d0b0', 0, 0, TS, TS); dots(px, '#ac7c00', SPECK_A); dots(px, '#fce0a8', SPECK_B); });
+  tile('B', (px) => { px('#0058f8', 0, 0, TS, TS); px('#ac7c00', 0, 1, TS, 14); for (let i = 0; i < 16; i += 4) px('#503000', i, 1, 1, 14); px('#000000', 0, 1, TS, 1); px('#000000', 0, 14, TS, 1); px('#f8d878', 1, 3, 2, 1); px('#f8d878', 9, 8, 2, 1); });
+  tile('C', (px, art) => {
+    grassy(px, '#58d854', '#00a800');
+    art({ k: '#000000', w: '#bcbcbc', d: '#7c7c7c', r: '#f83800', R: '#a81000', g: '#503000' }, [
+      '      kkkk      ',
+      '    kkrrrrkk    ',
+      '   krrRRRRrrk   ',
+      '  kkkkkkkkkkkk  ',
+      '    kwwwwwwk    ',
+      'kkkkkkkkkkkkkkkk',
+      'kwdwkwdwwkwdwkwk',
+      'kwwwwwwwwwwwwwwk',
+      'kdwwdwkkkkwdwwdk',
+      'kwwwwkggggkwwwwk',
+      'kwdwwkggggkwwdwk',
+      'kwwwwkggggkwwwwk',
+      'kkkkkkkkkkkkkkkk',
+    ], 0, 2);
+  });
+  tile('V', (px, art) => {
+    grassy(px, '#58d854', '#00a800');
+    art({ k: '#000000', y: '#f8b800', Y: '#ac7c00', w: '#fce0a8', g: '#503000' }, [
+      '     kkkk       ',
+      '   kkyyyykk     ',
+      ' kkyyYYYYyykk   ',
+      'kyyYYYYYYYYyyk  ',
+      'kkkkkkkkkkkkkk  ',
+      ' kwwwwkkwwwwk   ',
+      ' kwwwwkgkwwwk   ',
+      ' kwwwwkgkwwwk   ',
+      ' kkkkkkkkkkkk   ',
+    ], 1, 5);
+  });
+  tile('A', (px, art) => {
+    px('#f0d0b0', 0, 0, TS, TS); dots(px, '#ac7c00', SPECK_A);
+    art({ k: '#000000', w: '#ac7c00', d: '#503000', r: '#a81000' }, [
+      '   kkkkkkkkkk   ',
+      '  krrrrrrrrrrk  ',
+      '  kkkkkkkkkkkk  ',
+      '    kwkwwkwk    ',
+      '    kwkwwkwk    ',
+      '   kkkkkkkkkk   ',
+      '    kdkwwkdk    ',
+      '    kwkwwkwk    ',
+      '    kwkddkwk    ',
+      '   kdkkddkkdk   ',
+      '   kkk kk kkk   ',
+    ], 0, 3);
+  });
+  // ---- towns and fortresses
+  tile('g', (px) => grassy(px, '#58d854', '#00a800', '#b8f818'));
+  tile('p', (px) => { px('#f8d878', 0, 0, TS, TS); dots(px, '#ac7c00', SPECK_A); });
+  tile('t', (px, art) => { grassy(px, '#58d854', '#00a800'); tree(px, art, 0, '#005800', '#00b800'); });
+  tile('s', (px) => { px('#7c7c7c', 0, 0, TS, TS); px('#3c3c3c', 0, 7, TS, 1); px('#3c3c3c', 0, 15, TS, 1); px('#3c3c3c', 7, 0, 1, 7); px('#3c3c3c', 15, 8, 1, 7); px('#bcbcbc', 1, 1, 2, 1); px('#bcbcbc', 9, 9, 2, 1); });
+  tile('w', (px) => brick(px, '#7c7c7c', '#000000', '#bcbcbc'));
+  tile('e', (px) => { px('#3c3c3c', 0, 0, TS, TS); px('#7c7c7c', 0, 0, TS, 3); for (let i = 0; i < 16; i += 8) { px('#bcbcbc', i, 0, 5, 1); px('#000000', i + 5, 0, 3, 3); } px('#000000', 0, 15, TS, 1); });
+  tile('D', (px) => { px('#000000', 0, 0, TS, TS); px('#3c3c3c', 1, 1, 14, 15); px('#000000', 3, 3, 10, 13); px('#a81000', 1, 1, 2, 15); px('#a81000', 13, 1, 2, 15); });
+  tile('L', (px) => { px('#000000', 0, 0, TS, TS); px('#a81000', 1, 1, 14, 15); px('#f83800', 2, 2, 5, 13); px('#f83800', 9, 2, 5, 13); px('#000000', 7, 1, 2, 15); for (const y of [4, 8, 12]) for (const x of [3, 5, 10, 12]) px('#f8b800', x, y); });
+  tile('c', (px) => { px('#a81000', 0, 0, TS, TS); px('#f8b800', 1, 0, 1, TS); px('#f8b800', 14, 0, 1, TS); px('#f83800', 5, 3, 6, 1); px('#f83800', 5, 11, 6, 1); });
+  tile('f', (px) => { px('#ac7c00', 0, 0, TS, TS); for (const y of [3, 7, 11, 15]) px('#503000', 0, y, TS, 1); px('#503000', 5, 0, 1, 3); px('#503000', 11, 4, 1, 3); px('#503000', 3, 8, 1, 3); px('#503000', 13, 12, 1, 3); });
+  tile('P', (px) => { px('#3c3c3c', 0, 0, TS, TS); px('#000000', 3, 0, 10, TS); px('#a81000', 4, 0, 8, TS); px('#f83800', 5, 0, 2, TS); px('#f8b800', 3, 0, 10, 2); px('#f8b800', 3, 13, 10, 3); });
+  tile('h', (px) => { px('#fce0a8', 0, 0, TS, TS); px('#503000', 0, 0, TS, 2); px('#503000', 0, 14, TS, 2); px('#503000', 0, 0, 2, TS); px('#503000', 14, 0, 2, TS); px('#000000', 5, 5, 6, 5); px('#ac7c00', 6, 6, 1, 3); px('#ac7c00', 9, 6, 1, 3); });
+  tile('i', (px) => { px('#fce0a8', 0, 0, TS, TS); px('#000000', 2, 2, 12, 14); px('#881400', 3, 3, 10, 13); px('#000000', 7, 3, 2, 13); px('#f8b800', 6, 9, 1, 2); px('#f8b800', 9, 9, 1, 2); });
+  tile('u', (px) => { px('#0058f8', 0, 0, TS, TS); px('#004058', 0, 0, TS, TS); for (const y of [3, 7, 11]) { px('#000000', 0, y, TS, 1); for (let i = (y === 7 ? 4 : 0); i < TS; i += 8) px('#008888', i + 1, y - 2, 5, 1); } px('#000000', 0, 15, TS, 1); });
+  tile('q', (px, a, v) => waves(px, '#0058f8', '#3cbcfc', v), 2);
+  tile('b', (px) => { px('#ac7c00', 0, 0, TS, TS); for (let i = 3; i < 16; i += 4) px('#503000', 0, i, TS, 1); px('#000000', 0, 0, 1, TS); px('#000000', 15, 0, 1, TS); });
+  const chest = (px, art, open) => {
+    art({ k: '#000000', r: '#a81000', R: '#f83800', g: '#f8b800', d: '#3c3c3c' }, open ? [
+      '                ',
+      '  kkkkkkkkkkkk  ',
+      ' kddddddddddddk ',
+      ' kddddddddddddk ',
+      ' kkkkkkkkkkkkkk ',
+      ' kRRRRRRRRRRRRk ',
+      ' krrrrrrrrrrrrk ',
+      ' krrrrrrrrrrrrk ',
+      ' kkkkkkkkkkkkkk ',
+    ] : [
+      '  kkkkkkkkkkkk  ',
+      ' kRRRRRRRRRRRRk ',
+      ' krrrrrggrrrrrk ',
+      ' kkkkkkggkkkkkk ',
+      ' kRRRRRggRRRRRk ',
+      ' krrrrrrrrrrrrk ',
+      ' krrrrrrrrrrrrk ',
+      ' kkkkkkkkkkkkkk ',
+    ], 0, 4);
   };
-  tile('T', (px, r) => { ground(px, r); crown(px, P.tree, P.tree2); }, 2);
-  tile('P', (px, r) => { px(P.forest, 0, 0, TS, TS); crown(px, '#24392c', P.tree); }, 2);
-  tile('H', (px, r) => { ground(px, r); for (let i = 0; i < 7; i++) { px(P.ink, 7 - i, 2 + i * 2, 1, 2); px(P.ink, 8 + i, 2 + i * 2, 1, 2); px(P.red, 8 - i, 2 + i * 2, i * 2, 2); } px(P.silk, 6, 8, 4, 8); px(P.ink, 7, 9, 2, 7); px(P.ink, 1, 15, 14, 1); px(P.silk, 7, 1, 2, 1); }, 1);
-  tile('f', (px, r) => { ground(px, r); px(P.wood2, 2, 4, 2, 11); px(P.wood2, 12, 4, 2, 11); px(P.wood, 0, 6, 16, 2); px(P.wood, 0, 11, 16, 2); px(P.ink, 0, 8, 16, 1); px(P.ink, 0, 13, 16, 1); }, 1);
-  tile('x', (px, r) => { ground(px, r); px(P.ink, 2, 3, 12, 12); px(P.wood, 3, 4, 10, 10); px(P.wood2, 3, 8, 10, 1); px(P.wood2, 7, 4, 1, 10); px(P.silk2, 4, 5, 2, 1); }, 1);
-  tile('c', (px, r, v) => { ground(px, r); px(P.ink, 3, 12, 10, 2); px(P.wood2, 4, 11, 8, 2); px(P.red, 5, 6, 6, 5); px(P.gold, 6 + v, 8 - v, 4, 3); px(P.silk, 7, 9, 2, 2); px(P.red, 7, 4 + v, 2, 2); }, 2);
-  tile('b', (px, r) => { ground(px, r); px(P.wood2, 7, 1, 2, 15); px(P.ink, 9, 2, 6, 8); px(P.red, 9, 3, 5, 6); px(P.silk, 11, 5, 1, 2); }, 1);
-  tile('B', (px, r) => { px(P.water, 0, 0, TS, TS); px(P.wood, 0, 0, TS, TS); for (let i = 0; i < 4; i++) px(P.wood2, 0, i * 4 + 3, TS, 1); px(P.ink, 0, 0, 1, TS); px(P.ink, 15, 0, 1, TS); }, 1);
-  tile('D', (px, r) => { px(P.water, 0, 0, TS, TS); px(P.ink, 0, 7, 16, 7); px(P.wood2, 1, 8, 14, 5); px(P.wood, 1, 8, 14, 2); px(P.wood2, 7, 0, 2, 8); px(P.red, 9, 1, 6, 6); px(P.foam, 2, 14, 12, 1); }, 1);
-  tile('C', (px, r) => { px(P.stone, 0, 0, TS, TS); px(P.stone2, 0, 3, TS, 1); px(P.stone2, 0, 8, TS, 1); px(P.stone2, 0, 13, TS, 1); for (let i = 0; i < 4; i++) { px(P.stone2, (i * 8) % 16, 0, 1, 3); px(P.stone2, (i * 8 + 4) % 16, 4, 1, 4); px(P.stone2, (i * 8) % 16, 9, 1, 4); } px(P.ink, 0, 15, TS, 1); }, 1);
-  tile('K', (px, r) => { px(P.stone2, 0, 0, TS, TS); speck(px, r, P.stone, 18); px(P.ink, 0, 0, TS, 1); for (let i = 0; i < 2; i++) px(P.ink, 2 + i * 8, 1, 4, 2); }, 1);
-  tile('G', (px, r) => { px(P.ink, 0, 0, TS, TS); px(P.red2, 1, 2, 14, 14); px(P.red, 2, 3, 5, 13); px(P.red, 9, 3, 5, 13); px(P.gold, 6, 8, 1, 2); px(P.gold, 9, 8, 1, 2); }, 1);
-  tile('A', (px, r) => { px(P.forest, 0, 0, TS, TS); px(P.ink, 2, 3, 12, 2); px(P.red2, 1, 1, 14, 3); px(P.silk, 3, 0, 10, 1); px(P.wood2, 3, 5, 2, 10); px(P.wood2, 11, 5, 2, 10); px(P.ink, 2, 15, 12, 1); px(P.silk2, 6, 9, 4, 6); px(P.ink, 7, 11, 2, 4); }, 1);
+  tile('x', (px, art) => { px('#7c7c7c', 0, 0, TS, TS); px('#3c3c3c', 0, 15, TS, 1); chest(px, art, false); });
+  tile('X', (px, art) => { px('#7c7c7c', 0, 0, TS, TS); px('#3c3c3c', 0, 15, TS, 1); chest(px, art, true); });
+  tile('l', (px) => { px('#7c7c7c', 0, 0, TS, TS); px('#000000', 3, 11, 10, 4); px('#ac7c00', 4, 12, 8, 2); px('#503000', 7, 3, 2, 9); px('#f83800', 6, 1, 4, 3); px('#000000', 6, 0, 4, 1); });
+  tile('F', (px, a, v) => { px('#7c7c7c', 0, 0, TS, TS); px('#000000', 3, 10, 10, 5); px('#503000', 4, 10, 8, 4); px('#f83800', 5, 4 + v, 6, 6 - v); px('#f8b800', 6 + v, 6, 4, 4); px('#fcfcfc', 7, 8, 2, 2); }, 2);
+  tile('S', (px) => { for (let i = 0; i < 4; i++) { px(['#000000', '#3c3c3c', '#7c7c7c', '#bcbcbc'][i], 0, i * 4, TS, 4); } });
+  tile('K', (px, art) => {
+    px('#a81000', 0, 0, TS, TS);
+    art({ k: '#000000', g: '#f8b800', G: '#ac7c00', r: '#f83800' }, [
+      '   kkkkkkkkkk   ',
+      '  kggggggggggk  ',
+      '  kgGGGGGGGGgk  ',
+      '  kgGrrrrrrGgk  ',
+      '  kgGrrrrrrGgk  ',
+      '  kgGrrrrrrGgk  ',
+      ' kkggggggggggkk ',
+      ' kggggggggggggk ',
+      ' kGkkkkkkkkkkGk ',
+      ' kgk        kgk ',
+      ' kkk        kkk ',
+    ], 0, 3);
+  });
+  tile('v', (px) => { px('#7c7c7c', 0, 0, TS, TS); px('#000000', 1, 2, 14, 13); px('#ac7c00', 2, 3, 12, 11); px('#503000', 2, 8, 12, 1); px('#503000', 7, 3, 2, 11); px('#f8d878', 3, 4, 3, 1); });
+  tile('n', (px) => { grassy(px, '#f0d0b0', '#ac7c00'); for (let i = 0; i < 7; i++) { px('#000000', 7 - i, 1 + i * 2, 1, 2); px('#000000', 8 + i, 1 + i * 2, 1, 2); px('#f8b800', 8 - i, 1 + i * 2, i * 2, 2); } px('#000000', 6, 9, 4, 6); px('#000000', 1, 15, 14, 1); });
+  tile('y', (px) => { grassy(px, '#58d854', '#00a800'); px('#000000', 2, 3, 3, 12); px('#000000', 11, 3, 3, 12); px('#ac7c00', 3, 4, 1, 10); px('#ac7c00', 12, 4, 1, 10); px('#000000', 0, 5, TS, 4); px('#ac7c00', 0, 6, TS, 2); px('#000000', 0, 10, TS, 3); px('#ac7c00', 0, 11, TS, 1); });
+  tile('a', (px) => { px('#ac7c00', 0, 0, TS, TS); px('#000000', 0, 3, TS, 10); px('#881400', 0, 4, TS, 7); px('#e45c10', 0, 4, TS, 1); px('#fcfcfc', 3, 6, 3, 3); px('#f8b800', 10, 6, 3, 3); px('#000000', 2, 13, 2, 3); px('#000000', 12, 13, 2, 3); });
+  tile('z', (px) => { px('#000000', 0, 0, TS, TS); });
+  tile('j', (px) => { px('#3c3c3c', 0, 0, TS, TS); px('#000000', 0, 7, TS, 1); px('#000000', 0, 15, TS, 1); px('#000000', 7, 0, 1, 7); px('#000000', 15, 8, 1, 7); px('#7c7c7c', 2, 2, 2, 1); px('#7c7c7c', 10, 10, 2, 1); });
+  // the castle flags on the great map: your red, the enemy's blue
+  flags.me = mkFlag('#f83800'); flags.foe = mkFlag('#0058f8'); flags.neutral = mkFlag('#fcfcfc');
+  // the pointer that stands over where to go next
+  const a = document.createElement('canvas'); a.width = 9; a.height = 9;
+  const ax = a.getContext('2d');
+  for (const [i, r] of ['kkkkkkkkk', 'kgggggggk', ' kgggggk ', ' kgggggk ', '  kgggk  ', '  kgggk  ', '   kgk   ', '   kgk   ', '    k    '].entries()) [...r].forEach((ch, j) => { if (ch !== ' ') { ax.fillStyle = ch === 'k' ? '#000000' : '#f8b800'; ax.fillRect(j, i, 1, 1); } });
+  pointer.c = a;
+}
+export const flags = {};
+export const pointer = {};
+function mkFlag(col) {
+  const c = document.createElement('canvas'); c.width = 8; c.height = 9;
+  const x = c.getContext('2d');
+  x.fillStyle = '#000000'; x.fillRect(0, 0, 1, 9); x.fillRect(1, 0, 7, 6);
+  x.fillStyle = col; x.fillRect(1, 1, 6, 4);
+  return c;
 }
 
 // walk sheet: 3 columns (still, step, step) by 4 rows (down, left, right, up), 24x32 cells
@@ -78,18 +240,61 @@ export const DIRS = { down: 0, left: 1, right: 2, up: 3 };
 export function drawActor(c, key, dir, frame, x, y, scale = 1) {
   const im = img['w_' + key];
   const cw = 24, ch = 32, w = cw * scale, h = ch * scale;
-  if (!im) { c.fillStyle = '#b5301f'; c.fillRect(x - 6, y - 16, 12, 16); return; }
+  if (!im) { c.fillStyle = '#f83800'; c.fillRect(x - 6, y - 16, 12, 16); return; }
   c.drawImage(im, frame * cw, DIRS[dir] * ch, cw, ch, Math.round(x - w / 2), Math.round(y - h), w, h);
 }
 
 // troop sheet: 3 columns (inf, cav, arc) by 2 rows (standing, attacking), 24x22 cells
 const TROOP = { inf: 0, cav: 1, arc: 2 };
-export function drawTroop(c, side, type, frame, x, y, flip) {
-  const im = img[side === 'ally' ? 'troops_red' : 'troops_blue'];
+export function drawTroop(c, team, type, frame, x, y, flip) {
+  const im = img['troops_' + team] || img.troops_red;
   if (!im) return;
   c.save();
   c.translate(Math.round(x), Math.round(y));
   if (flip) c.scale(-1, 1);
   c.drawImage(im, TROOP[type] * 24, frame * 22, 24, 22, -12, -22, 24, 22);
   c.restore();
+}
+
+// words on the canvas: hard pixels with a black edge, no blur. Cached, since the same few labels draw every frame.
+const textCache = new Map();
+export function pixelText(c, text, x, y, col = '#fcfcfc', align = 'center') {
+  const key = text + '|' + col;
+  let im = textCache.get(key);
+  if (!im) {
+    const m = document.createElement('canvas').getContext('2d');
+    m.font = '11px Cubic11, sans-serif';
+    const w = Math.ceil(m.measureText(text).width) + 4, h = 15;
+    const off = document.createElement('canvas'); off.width = w; off.height = h;
+    const o = off.getContext('2d', { willReadFrequently: true });
+    o.font = m.font; o.textBaseline = 'alphabetic'; o.fillStyle = '#ffffff';
+    o.fillText(text, 2, 12);
+    const src = o.getImageData(0, 0, w, h), a = src.data;
+    const on = (i, j) => i >= 0 && j >= 0 && i < w && j < h && a[(i + j * w) * 4 + 3] > 110;
+    const r = parseInt(col.slice(1, 3), 16), g = parseInt(col.slice(3, 5), 16), b = parseInt(col.slice(5, 7), 16);
+    const out = o.createImageData(w, h), d = out.data;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const p = (i + j * w) * 4;
+      if (on(i, j)) { d[p] = r; d[p + 1] = g; d[p + 2] = b; d[p + 3] = 255; }
+      else if (on(i + 1, j) || on(i - 1, j) || on(i, j + 1) || on(i, j - 1)) { d[p + 3] = 255; }
+    }
+    o.putImageData(out, 0, 0);
+    im = off;
+    textCache.set(key, im);
+  }
+  const left = align === 'center' ? Math.round(x - im.width / 2) : Math.round(x);
+  c.drawImage(im, left, Math.round(y) - 12);
+}
+
+// the colour above a background's top edge, for screens taller than the picture
+const skyCache = {};
+export function skyOf(name) {
+  if (skyCache[name]) return skyCache[name];
+  const im = img[name];
+  if (!im) return '#000000';
+  const c = document.createElement('canvas'); c.width = 1; c.height = 1;
+  const x = c.getContext('2d');
+  x.drawImage(im, 0, 0, 1, 1, 0, 0, 1, 1);
+  const d = x.getImageData(0, 0, 1, 1).data;
+  return (skyCache[name] = `rgb(${d[0]},${d[1]},${d[2]})`);
 }
