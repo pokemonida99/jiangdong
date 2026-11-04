@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#15110d">
+<title>江東烽火</title>
+<link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+<div id="stage">
+  <canvas id="view"></canvas>
+  <div id="hud" hidden>
+    <div id="goal"></div>
+    <button id="menuBtn" class="plaque small">軍務</button>
+  </div>
+  <div id="battleUi" hidden></div>
+  <div id="dialog" hidden>
+    <img id="face" alt="" draggable="false">
+    <div id="who"></div>
+    <div id="line"></div>
+    <div id="more">▼</div>
+  </div>
+  <div id="choices" hidden></div>
+  <div id="menu" hidden></div>
+  <div id="toast" hidden></div>
+  <div id="title" hidden></div>
+  <div id="fade" hidden></div>
+  <div id="boot"><div class="bootMsg">整軍中…</div><button id="bootGo" class="plaque" hidden>點一下開始</button></div>
+</div>
+<script type="module" src="js/main.js?v=1"></script>
+</body>
+</html>
